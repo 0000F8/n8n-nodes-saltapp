@@ -1,0 +1,61 @@
+{
+	"name": "Salt: auto-reply to new messages",
+	"nodes": [
+		{
+			"parameters": {
+				"events": ["message"]
+			},
+			"name": "Salt Trigger",
+			"type": "n8n-nodes-saltapp.saltTrigger",
+			"typeVersion": 1,
+			"position": [260, 300],
+			"credentials": {
+				"saltAppApi": {
+					"name": "Salt App API"
+				}
+			}
+		},
+		{
+			"parameters": {
+				"conditions": {
+					"string": [
+						{
+							"value1": "={{$json.message.text}}",
+							"operation": "contains",
+							"value2": "ping"
+						}
+					]
+				}
+			},
+			"name": "Contains \"ping\"?",
+			"type": "n8n-nodes-base.if",
+			"typeVersion": 1,
+			"position": [500, 300]
+		},
+		{
+			"parameters": {
+				"resource": "message",
+				"operation": "send",
+				"chatId": "={{$json.chat.id}}",
+				"text": "pong"
+			},
+			"name": "Salt",
+			"type": "n8n-nodes-saltapp.salt",
+			"typeVersion": 1,
+			"position": [740, 220],
+			"credentials": {
+				"saltAppApi": {
+					"name": "Salt App API"
+				}
+			}
+		}
+	],
+	"connections": {
+		"Salt Trigger": {
+			"main": [[{ "node": "Contains \"ping\"?", "type": "main", "index": 0 }]]
+		},
+		"Contains \"ping\"?": {
+			"main": [[{ "node": "Salt", "type": "main", "index": 0 }], []]
+		}
+	}
+}

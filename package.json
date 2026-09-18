@@ -1,0 +1,60 @@
+{
+    "name": "n8n-nodes-saltapp",
+    "version": "0.1.0",
+    "description": "n8n community nodes for Salt (saltapp.ai), an end-to-end encrypted chat where humans and AI agents are the same kind of contact: trigger on messages/card taps/invoices, send encrypted messages, post cards, request payments and invoices, and ask a human in the loop.",
+    "license": "MIT",
+    "homepage": "https://saltapp.ai",
+    "keywords": [
+        "n8n-community-node-package"
+    ],
+    "author": {
+        "name": "0x0000F8",
+        "email": "0000F8@proton.me"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/0000F8/n8n-nodes-saltapp.git"
+    },
+    "bugs": {
+        "url": "https://github.com/0000F8/n8n-nodes-saltapp/issues"
+    },
+    "scripts": {
+        "build": "n8n-node build && node scripts/bundle-pgp.mjs",
+        "build:watch": "tsc --watch",
+        "dev": "n8n-node dev",
+        "lint": "n8n-node lint",
+        "lint:fix": "n8n-node lint --fix",
+        "test": "vitest run",
+        "release": "n8n-node release",
+        "prepublishOnly": "n8n-node prerelease"
+    },
+    "files": [
+        "dist"
+    ],
+    "n8n": {
+        "n8nNodesApiVersion": 1,
+        "strict": true,
+        "credentials": [
+            "dist/credentials/SaltAppApi.credentials.js"
+        ],
+        "nodes": [
+            "dist/nodes/SaltTrigger/SaltTrigger.node.js",
+            "dist/nodes/Salt/Salt.node.js"
+        ]
+    },
+    "devDependencies": {
+        "@n8n/node-cli": "*",
+        "@types/node": "^26.6.1",
+        "esbuild": "^0.28.2",
+        "eslint": "9.32.0",
+        "openpgp": "^5.11.3",
+        "prettier": "3.6.2",
+        "release-it": "^19.0.4",
+        "typescript": "5.9.2",
+        "vite": "^8.3.0",
+        "vitest": "^5.0.1"
+    },
+    "peerDependencies": {
+        "n8n-workflow": "*"
+    }
+}

@@ -1,0 +1,86 @@
+{
+	"name": "Salt: ask a human and wait for approval",
+	"nodes": [
+		{
+			"parameters": {
+				"events": ["message", "cardInteraction"]
+			},
+			"name": "Salt Trigger",
+			"type": "n8n-nodes-saltapp.saltTrigger",
+			"typeVersion": 1,
+			"position": [260, 300],
+			"notes": "Must be active for the resume bridge to work -- see README.md's \"Ask a Human and Wait\" section. Its own output is unused by this workflow; only its running, activated presence matters.",
+			"credentials": {
+				"saltAppApi": {
+					"name": "Salt App API"
+				}
+			}
+		},
+		{
+			"parameters": {
+				"conditions": {
+					"string": [
+						{
+							"value1": "={{$json.message.text}}",
+							"operation": "startsWith",
+							"value2": "approve expense:"
+						}
+					]
+				}
+			},
+			"name": "Looks like an expense request?",
+			"type": "n8n-nodes-base.if",
+			"typeVersion": 1,
+			"position": [500, 300]
+		},
+		{
+			"parameters": {
+				"resource": "agent",
+				"operation": "askAndWait",
+				"chatId": "={{$json.chat.id}}",
+				"question": "={{$json.message.text}}",
+				"options": {
+					"option": [{ "label": "Approve" }, { "label": "Decline" }]
+				},
+				"timeoutHours": 24
+			},
+			"name": "Salt: Ask a Human and Wait",
+			"type": "n8n-nodes-saltapp.salt",
+			"typeVersion": 1,
+			"position": [740, 220],
+			"credentials": {
+				"saltAppApi": {
+					"name": "Salt App API"
+				}
+			}
+		},
+		{
+			"parameters": {
+				"resource": "message",
+				"operation": "send",
+				"chatId": "={{$('Looks like an expense request?').item.json.chat.id}}",
+				"text": "={{$json.timedOut ? 'Nobody responded in time.' : 'Recorded: ' + $json.option}}"
+			},
+			"name": "Salt: Reply with the outcome",
+			"type": "n8n-nodes-saltapp.salt",
+			"typeVersion": 1,
+			"position": [980, 220],
+			"credentials": {
+				"saltAppApi": {
+					"name": "Salt App API"
+				}
+			}
+		}
+	],
+	"connections": {
+		"Salt Trigger": {
+			"main": [[{ "node": "Looks like an expense request?", "type": "main", "index": 0 }]]
+		},
+		"Looks like an expense request?": {
+			"main": [[{ "node": "Salt: Ask a Human and Wait", "type": "main", "index": 0 }], []]
+		},
+		"Salt: Ask a Human and Wait": {
+			"main": [[{ "node": "Salt: Reply with the outcome", "type": "main", "index": 0 }]]
+		}
+	}
+}
