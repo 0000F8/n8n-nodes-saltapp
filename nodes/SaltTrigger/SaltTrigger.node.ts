@@ -10,7 +10,7 @@ import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { decryptArmoredMessage, looksLikePgpMessage } from '../shared/pgp';
 import { decodeResumeActionId } from '../shared/resumeToken';
-import { buildGetWebhookSecretRequest, buildSetCallbackRequest } from '../shared/SaltApiClient';
+import { buildGetWebhookSecretRequest, buildSetCallbackRequest, buildSetDeliveryModeRequest } from '../shared/SaltApiClient';
 import { verifySignature } from '../shared/signature';
 
 /** What this trigger keeps in the workflow's own persisted static data
@@ -138,6 +138,32 @@ export class SaltTrigger implements INodeType {
 					);
 				}
 
+				// `delivery_mode` is a separate, sticky column from the callback
+				// URL (User#socket_mode?): a previous deactivation of THIS trigger
+				// (see delete() below) may have switched this agent to
+				// `mode: "socket"`, which would otherwise silently survive a
+				// fresh, valid callback and leave Salt still not POSTing here.
+				// Best-effort: an agent that was never deactivated needs no
+				// change, and an older salt-api without this endpoint just
+				// leaves delivery_mode alone (a blank-callback default already
+				// covers most of what this matters for).
+				try {
+					const setMode = buildSetDeliveryModeRequest('webhook');
+					await this.helpers.httpRequestWithAuthentication.call(this, 'saltAppApi', {
+						method: setMode.method,
+						url: setMode.path,
+						body: setMode.body,
+						json: true,
+					});
+				} catch (error) {
+					// Non-fatal -- see comment above -- but surfaced, not hidden:
+					// an older salt-api without this endpoint is expected and fine,
+					// anything else here is worth a human noticing.
+					this.logger.warn(
+						`Salt Trigger: could not reset delivery mode to "webhook" on activation (continuing; this agent may stay in socket mode if it was previously deactivated): ${(error as Error).message}`,
+					);
+				}
+
 				// Fetch and cache the signing secret now, so the very first
 				// delivery after activation can already be verified.
 				const secretSpec = buildGetWebhookSecretRequest();
@@ -158,10 +184,36 @@ export class SaltTrigger implements INodeType {
 				// value on purpose (AgentsController#set_callback: `return error if
 				// url.blank?`) -- an agent can set its OWN callback but not clear
 				// it, only its human owner can, from the agent's admin form. So
-				// deactivating this trigger cannot un-point Salt's callback; it
-				// just stops answering. Left-over deliveries fail harmlessly and
-				// Salt gives up after 3 retries (AgentWebhookRetries). Documented
-				// in README.md / HANDOFF.md so this isn't a surprise.
+				// deactivating this trigger cannot un-point Salt's callback URL
+				// directly -- but it CAN switch this agent to socket mode
+				// (PATCH /api/v1/agents/delivery {mode: "socket"}, LANES.md's K2
+				// contract), which makes Salt stop POSTing to the now-dead
+				// webhook URL regardless of what `callback` still says
+				// (User#socket_mode?: an explicit delivery_mode of "socket" wins
+				// even with a callback configured). Without this, Salt kept
+				// retrying the dead URL (AgentWebhookRetries, 3 attempts) and
+				// eventually firing the owner's `agent_webhook_failing`
+				// notification for a trigger that was deliberately turned off.
+				// Best-effort: if the endpoint isn't deployed yet, deactivation
+				// still succeeds locally, just without silencing Salt's retries.
+				try {
+					const setMode = buildSetDeliveryModeRequest('socket');
+					await this.helpers.httpRequestWithAuthentication.call(this, 'saltAppApi', {
+						method: setMode.method,
+						url: setMode.path,
+						body: setMode.body,
+						json: true,
+					});
+				} catch (error) {
+					// Non-fatal -- see comment above -- but surfaced, not hidden:
+					// an older salt-api without this endpoint is expected and
+					// fine (Salt just keeps retrying the dead URL for a while),
+					// anything else here is worth a human noticing.
+					this.logger.warn(
+						`Salt Trigger: could not switch delivery mode to "socket" on deactivation (continuing; Salt may keep retrying the now-dead webhook URL until it gives up): ${(error as Error).message}`,
+					);
+				}
+
 				const staticData = this.getWorkflowStaticData('node') as SaltTriggerStaticData;
 				delete staticData.registeredUrl;
 				delete staticData.webhookSecret;

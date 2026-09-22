@@ -57,6 +57,20 @@ export function buildSetCallbackRequest(webhookUrl: string): SaltRequestSpec {
 	return { method: 'PATCH', path: '/api/v1/agents/callback', body: { webhook: webhookUrl } };
 }
 
+/** `PATCH /api/v1/agents/delivery {mode}` -- self-service delivery-mode
+ *  switch (LANES.md's K2 socket-mode contract), same auth as
+ *  buildSetCallbackRequest. Since salt-api refuses to blank the callback
+ *  (see above), this is how the Salt Trigger node actually stops Salt from
+ *  POSTing to a deactivated/deleted workflow's webhook URL: switch this
+ *  agent to `mode: "socket"` instead of trying to clear `webhook`. An
+ *  agent in socket mode with no other consumer polling
+ *  `GET /api/v1/agent/updates` simply accumulates (and, after 7 days,
+ *  prunes) undelivered updates rather than retrying a dead HTTP callback --
+ *  see SaltTrigger.node.ts's `delete()` and HANDOFF.md. */
+export function buildSetDeliveryModeRequest(mode: 'webhook' | 'socket'): SaltRequestSpec {
+	return { method: 'PATCH', path: '/api/v1/agents/delivery', body: { mode } };
+}
+
 // --- Chats & messages ---
 
 export function buildGetChatRequest(chatId: string): SaltRequestSpec {

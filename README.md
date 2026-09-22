@@ -82,9 +82,13 @@ salt-mcp both mint one the same way salt-fe would (curve25519).
 
 A webhook trigger. **Activating** the workflow calls
 `PATCH /api/v1/agents/callback` to point this agent's Salt account at the URL
-n8n generates; **deactivating** it does *not* clear that callback -- see
-[HANDOFF.md](./HANDOFF.md) for why salt-api's own API makes that impossible,
-and what that means in practice.
+n8n generates (and resets its delivery mode to `webhook`, in case it was
+previously deactivated); **deactivating** it does *not* clear that callback
+-- salt-api's own API makes that impossible for an agent to do to itself --
+but it DOES switch this agent's delivery mode to `socket`
+(`PATCH /api/v1/agents/delivery`), which stops Salt from POSTing to the now
+unattended URL at all rather than retrying a dead endpoint a few times and
+giving up. See [HANDOFF.md](./HANDOFF.md) for the full reasoning.
 
 Events (pick any combination):
 

@@ -1,5 +1,29 @@
 # HANDOFF -- n8n-nodes-saltapp
 
+## 2026-09-22 alignment pass (round-4 socket contract, real brand icons)
+
+- **Trigger deactivation now silences Salt's retries.** `delete()` PATCHes
+  `PATCH /api/v1/agents/delivery {mode: "socket"}` (new
+  `buildSetDeliveryModeRequest` in `SaltApiClient.ts`) before clearing its
+  own static data; `create()` symmetrically PATCHes back to `mode: "webhook"`
+  on (re)activation, since `delivery_mode` is a separate, sticky column from
+  the callback URL that doesn't reset itself. Both calls are best-effort
+  (logged via `this.logger.warn`, not thrown) so an older salt-api without
+  this endpoint doesn't break activation/deactivation. See "Other decisions
+  worth knowing about" below for the full reasoning.
+- **Real brand icons.** `nodes/shared/icons/salt.svg`/`salt.dark.svg` were
+  hand-drawn approximations; they're now exact copies of
+  `salt-fe/brand/salt-mark-paper.svg` / `salt-mark.svg`.
+- **No poll loop here to align** -- this package is webhook-only by design
+  (n8n trigger nodes are HTTP-endpoint-based, not long-running processes);
+  the round-4 socket contract (adaptive short-poll, `after` omission on a
+  fresh cursor, 300s tolerance) applies to the OTHER five repos' pollers,
+  not to this one.
+- 36 -> 38 tests passing, `n8n-node lint` and `n8n-node build` (+
+  `bundle-pgp`) both clean.
+
+---
+
 Lane `n8n` (design-fleet run `2026-09-17-distribution`). New standalone
 repository at `/Users/z1ggy/projects/salt/n8n-nodes-saltapp`, git-initialized
 and committed locally by the scaffolding tool + this session. **No GitHub
@@ -87,15 +111,25 @@ input. See `credentials/SaltAppApi.credentials.ts`.
 
 ## Other decisions worth knowing about
 
-- **Deactivating the Salt Trigger cannot clear Salt's callback.**
-  `AgentsController#set_callback` (`salt-api/app/controllers/api/v1/agents_controller.rb`)
-  refuses a blank `webhook` value -- an agent can set its OWN callback but
-  never clear it via that api-key-authenticated endpoint; only the owner can,
-  from the dashboard (a different, session-authenticated path). Read the
-  Rails source directly before assuming otherwise. `delete()` is therefore a
-  local no-op (clears this node's own cached static data) and the README
-  says so plainly. Left-over deliveries after deactivation fail harmlessly
-  (Salt retries 3x via `AgentWebhookRetries`, then gives up).
+- **Deactivating the Salt Trigger cannot clear Salt's callback -- but it
+  now switches this agent to socket mode instead (fixed 2026-09-22).**
+  `AgentsController#set_callback` refuses a blank `webhook` value -- an
+  agent can set its OWN callback but never clear it via that
+  api-key-authenticated endpoint; only the owner can, from the dashboard (a
+  different, session-authenticated path). What CAN be self-serviced is
+  `delivery_mode` (`PATCH /api/v1/agents/delivery {mode}`, LANES.md's K2
+  socket-mode contract, `User#socket_mode?`): it's a separate, sticky
+  column from the callback URL, and an explicit `delivery_mode: "socket"`
+  wins even with a real callback configured. So `delete()` now PATCHes this
+  agent to `mode: "socket"` (best-effort; logs a warning rather than
+  failing if the endpoint isn't deployed) before clearing its own cached
+  static data, which stops Salt from POSTing to the dead URL at all rather
+  than just letting `AgentWebhookRetries` exhaust its 3 attempts and fire
+  the owner's `agent_webhook_failing` notification for a trigger that was
+  deliberately turned off. `create()` (reactivation) symmetrically PATCHes
+  back to `mode: "webhook"` -- otherwise a re-enabled trigger would set a
+  fresh, valid callback that Salt still never uses, because
+  `delivery_mode` doesn't reset itself.
 - **`checkExists()` can't ask Salt "what's my current callback?"** -- there
   is no read endpoint for it (only the write-only `PATCH .../callback`, which
   echoes back what it just set). `checkExists()` compares against this
@@ -125,11 +159,13 @@ input. See `credentials/SaltAppApi.credentials.ts`.
   actions+buttons -- would need a large `fixedCollection` tree to express
   natively). Documented as a known simplification; a follow-up could add a
   friendlier "Quick Card" mode alongside the raw JSON escape hatch.
-- **Icons**: `nodes/shared/icons/salt.svg`/`salt.dark.svg` are simple
-  placeholder renderings of the Salt mark description in the workspace
-  CLAUDE.md (grain shape, brand blue `#2563EB`), not exports from
-  `salt-fe/brand/`. Swap in the real brand SVGs before a public release if
-  visual consistency with the rest of Salt's brand matters for this listing.
+- ~~**Icons**: ... placeholder renderings ... not exports from
+  `salt-fe/brand/`~~. **Fixed 2026-09-22**: `nodes/shared/icons/salt.svg`
+  (used as `icon.light`) and `salt.dark.svg` (`icon.dark`) are now exact,
+  byte-for-byte copies of `salt-fe/brand/salt-mark-paper.svg` (the paper
+  form, for light grounds) and `salt-fe/brand/salt-mark.svg` (the dark
+  form, white cap + brand-blue body, for dark grounds) respectively --
+  never hand-redrawn.
 
 ## How to test
 

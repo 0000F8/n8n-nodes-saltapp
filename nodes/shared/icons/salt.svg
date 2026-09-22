@@ -1,5 +1,7 @@
-<svg width="60" height="60" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-	<!-- A grain of salt: cap cut at a third, hairline gap, sharp points -- see salt-fe/brand/salt-mark.svg -->
-	<polygon points="32,4 54,20 54,44 32,60 10,44 10,20" fill="#2563EB" />
-	<polygon points="32,4 54,20 32,24 10,20" fill="#0f172a" fill-opacity="0.18" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Salt</title>
+  <path d="M32.00 4.00 L47.63 22.24 L16.37 22.24 Z" fill="#ffffff"/>
+  <path d="M14.99 23.84 L49.01 23.84 L56.00 32.00 L32.00 60.00 L8.00 32.00 Z" fill="#ffffff"/>
+  <path d="M32.00 4.00 L47.63 22.24 L16.37 22.24 Z M32.00 7.69 L42.41 19.84 L21.59 19.84 Z" fill="#2563EB" fill-rule="evenodd"/>
+  <path d="M14.99 23.84 L49.01 23.84 L56.00 32.00 L32.00 60.00 L8.00 32.00 Z M16.09 26.24 L47.91 26.24 L52.84 32.00 L32.00 56.31 L11.16 32.00 Z" fill="#2563EB" fill-rule="evenodd"/>
 </svg>

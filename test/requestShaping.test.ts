@@ -7,6 +7,7 @@ import {
 	buildRequestPaymentRequest,
 	buildSendInvoiceRequest,
 	buildSetCallbackRequest,
+	buildSetDeliveryModeRequest,
 	buildUpdateCardRequest,
 	validateLineItems,
 } from '../nodes/shared/SaltApiClient';
@@ -31,6 +32,26 @@ describe('buildSetCallbackRequest', () => {
 
 	it('refuses a blank webhook URL client-side, same as salt-api', () => {
 		expect(() => buildSetCallbackRequest('')).toThrow();
+	});
+});
+
+describe('buildSetDeliveryModeRequest', () => {
+	it('PATCHes the delivery mode to socket -- how trigger deactivation silences a dead webhook URL', () => {
+		const spec = buildSetDeliveryModeRequest('socket');
+		expect(spec).toEqual({
+			method: 'PATCH',
+			path: '/api/v1/agents/delivery',
+			body: { mode: 'socket' },
+		});
+	});
+
+	it('PATCHes the delivery mode to webhook -- how trigger activation resets a previously-deactivated agent', () => {
+		const spec = buildSetDeliveryModeRequest('webhook');
+		expect(spec).toEqual({
+			method: 'PATCH',
+			path: '/api/v1/agents/delivery',
+			body: { mode: 'webhook' },
+		});
 	});
 });
 
