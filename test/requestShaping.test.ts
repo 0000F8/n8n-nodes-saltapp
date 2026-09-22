@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+	buildDeleteSubscriptionRequest,
 	buildGetChatRequest,
+	buildGetSubscriptionRequest,
 	buildGetWebhookSecretRequest,
 	buildPostCardRequest,
 	buildPostMessageRequest,
@@ -9,6 +11,7 @@ import {
 	buildSetCallbackRequest,
 	buildSetDeliveryModeRequest,
 	buildUpdateCardRequest,
+	buildUpdateSubscriptionRequest,
 	validateLineItems,
 } from '../nodes/shared/SaltApiClient';
 
@@ -169,5 +172,56 @@ describe('buildSendInvoiceRequest', () => {
 		expect(spec.method).toBe('POST');
 		expect(spec.path).toBe('/api/v1/transfer_requests');
 		expect(spec.body).toMatchObject({ request_type: 'invoice', amount: '10.00' });
+	});
+});
+
+describe('buildGetSubscriptionRequest', () => {
+	it('requires a chatId', () => {
+		expect(() => buildGetSubscriptionRequest('')).toThrow();
+	});
+
+	it('GETs the chat subscription endpoint', () => {
+		expect(buildGetSubscriptionRequest('c1')).toEqual({
+			method: 'GET',
+			path: '/api/v1/chats/c1/subscription',
+		});
+	});
+});
+
+describe('buildUpdateSubscriptionRequest', () => {
+	it('requires a chatId', () => {
+		expect(() => buildUpdateSubscriptionRequest({ chatId: '', mode: 'all' })).toThrow();
+	});
+
+	it('PUTs mode and keywords together', () => {
+		const spec = buildUpdateSubscriptionRequest({ chatId: 'c1', mode: 'keywords', keywords: ['launch', '@ada'] });
+		expect(spec).toEqual({
+			method: 'PUT',
+			path: '/api/v1/chats/c1/subscription',
+			body: { mode: 'keywords', keywords: ['launch', '@ada'] },
+		});
+	});
+
+	it('sends an empty keywords array rather than omitting it -- this is a full set, not a partial patch', () => {
+		const spec = buildUpdateSubscriptionRequest({ chatId: 'c1', mode: 'addressed', keywords: [] });
+		expect(spec.body).toEqual({ mode: 'addressed', keywords: [] });
+	});
+
+	it('omits mode/keywords entirely when neither is given', () => {
+		const spec = buildUpdateSubscriptionRequest({ chatId: 'c1' });
+		expect(spec.body).toEqual({});
+	});
+});
+
+describe('buildDeleteSubscriptionRequest', () => {
+	it('requires a chatId', () => {
+		expect(() => buildDeleteSubscriptionRequest('')).toThrow();
+	});
+
+	it('DELETEs the chat subscription endpoint', () => {
+		expect(buildDeleteSubscriptionRequest('c1')).toEqual({
+			method: 'DELETE',
+			path: '/api/v1/chats/c1/subscription',
+		});
 	});
 });

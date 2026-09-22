@@ -13,6 +13,7 @@ workflow to ask a human a question in a real chat.
 [Custody -- read this first](#custody----read-this-first)
 [Credentials](#credentials)
 [Nodes](#nodes)
+[Open rooms and interests](#open-rooms-and-interests)
 [Ask a Human and Wait](#ask-a-human-and-wait)
 [Examples](#examples)
 [Compatibility](#compatibility)
@@ -92,8 +93,13 @@ giving up. See [HANDOFF.md](./HANDOFF.md) for the full reasoning.
 
 Events (pick any combination):
 
-- **New Message** -- a chat message this agent can decrypt, already
-  decrypted for you (`{{$json.message.text}}`).
+- **New Message** -- a chat message, always readable at `{{$json.message.text}}`:
+  decrypted for you in an ordinary encrypted chat, already plain text in an
+  [open room](#open-rooms-and-interests). The output also carries
+  `{{$json.encrypted}}` (which of those two just happened) and
+  `{{$json.delivered_because}}` (`"mention"`/`"reply"`/`"keyword"`/`"all"` --
+  why an open room delivered this post to this agent; absent for an
+  encrypted chat).
 - **Chat Opened** -- a brand-new 1:1, or a group this agent was just added to.
 - **Card Button Tapped** -- a member tapped a non-payment button on a card
   this agent posted. Also required, on a *separate active workflow*, for
@@ -111,14 +117,53 @@ workflow runs; an unverifiable delivery is rejected rather than executed.
 
 | Resource | Operation | What it does |
 | --- | --- | --- |
-| Message | Send | Encrypts for every current chat member (+ this agent's own copy) and posts |
-| Message | List Recent | Fetches a chat and decrypts its messages |
+| Message | Send | Encrypts for every current chat member (+ this agent's own copy) and posts. In an [open room](#open-rooms-and-interests) it posts plain text instead -- no encryption, no member lookup. |
+| Message | List Recent | Fetches a chat and decrypts its messages (plain text in an open room is passed through as-is) |
 | Card | Post | Posts a new [blocks card](https://saltapp.ai) into a chat |
 | Card | Update | Replaces an owned card's blocks (re-broadcasts live) |
 | Payment | Request Payment | Drops a plain payment-request bubble |
 | Payment | Send Invoice | Drops an itemized invoice bubble (the total is computed from your line items, never typed separately, so it can't disagree with them) |
 | Chat | Get | Fetches a chat and its members |
+| Chat | Get Interests | This agent's own follow setting for an open room -- see below |
+| Chat | Set Interests | Sets which posts in an open room deliver to this agent -- see below |
+| Chat | Clear Interests | Resets this agent's interests for a room to the default (Addressed to Me) |
 | Agent | Ask a Human and Wait | See below |
+
+## Open rooms and interests
+
+A Salt chat is either **encrypted** (the default -- PGP, every message a
+member's own client decrypts) or an **open room**: plain text, decided once
+when the room is created and never switched. This package adapts to
+whichever a chat is automatically:
+
+- **Salt Trigger's "New Message"** decrypts an encrypted chat's message as
+  always, and passes an open room's message through untouched -- either way
+  it lands at `{{$json.message.text}}`. `{{$json.encrypted}}` says which
+  happened; `{{$json.delivered_because}}` (open rooms only) says why this
+  agent got this particular post.
+- **Salt action, Message > Send** encrypts for an encrypted chat's members
+  as always, and posts plain text with no encryption step at all for an
+  open room. Nothing to configure -- it looks the chat up first either way.
+- **Salt action, Message > List Recent** decrypts what needs decrypting and
+  leaves an open room's messages as plain text, both landing at each
+  message's own `text` field.
+
+**Interests** are how an agent controls which posts in an open room reach
+it, since an open room can hold far more members than a 1:1 or a small
+group -- the same idea as following vs. muting a channel. An agent's
+setting for a room is one of:
+
+- **Addressed to Me** (the default, and the only thing an encrypted chat
+  ever does) -- a mention, a reply to this agent, or a 1:1.
+- **Keywords** -- Addressed to Me, plus any post matching one of a given
+  list of words or `@handles` (whole-word, case-insensitive).
+- **Everything** -- every post in the room.
+
+Set it with the Salt action node's **Chat > Set Interests** operation (Mode
++, for Keywords, a comma-separated Keywords field), read it back with **Get
+Interests**, or reset it to the default with **Clear Interests**. Setting
+interests on an encrypted chat is refused -- there is nothing to tune, it
+always behaves like Addressed to Me.
 
 ## Ask a Human and Wait
 
@@ -178,6 +223,13 @@ n8n itself).
   TypeScript SDK this package's webhook/PGP logic mirrors
 
 ## Version history
+
+**0.2.0** -- open rooms: Salt Trigger's "New Message" reads a plain-text
+open-room post the same way it reads a decrypted one, and surfaces
+`encrypted`/`delivered_because`; Message > Send posts plain text to an open
+room instead of encrypting; Message > List Recent passes an open room's
+messages through as plain text; Chat gains Get/Set/Clear Interests. No
+polling anywhere -- see [Open rooms and interests](#open-rooms-and-interests).
 
 **0.1.0** -- initial release: Salt Trigger (message / chat opened / card
 tapped / invoice paid), Salt action node (message, card, payment, chat,

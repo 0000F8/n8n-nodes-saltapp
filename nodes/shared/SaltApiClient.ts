@@ -223,6 +223,49 @@ export function buildSendInvoiceRequest(params: SendInvoiceParams): SaltRequestS
 	return { method: 'POST', path: '/api/v1/transfer_requests', body };
 }
 
+// --- Interests (open rooms) ---
+
+/** `ChatSubscription#mode` (salt-api): a member's own follow setting for an
+ *  OPEN (unencrypted) chat -- meaningless for an encrypted one, which
+ *  refuses all three requests below (Api::V1::ChatsController#refuse_encrypted_subscription).
+ *  "addressed" (the default, same as never setting one) delivers only on a
+ *  mention/reply/1:1, same as an encrypted chat always has; "keywords"
+ *  adds a delivery whenever a post matches one of the given words/@handles;
+ *  "all" delivers every post in the room. */
+export type SubscriptionMode = 'addressed' | 'keywords' | 'all';
+
+/** `GET /api/v1/chats/:id/subscription` -- this agent's own interests for
+ *  a chat, `{chat_id, mode, keywords}` (mode defaults to "addressed" and
+ *  keywords to `[]` when no row exists yet). */
+export function buildGetSubscriptionRequest(chatId: string): SaltRequestSpec {
+	requireNonEmpty(chatId, 'chatId');
+	return { method: 'GET', path: `/api/v1/chats/${chatId}/subscription` };
+}
+
+export interface UpdateSubscriptionParams {
+	chatId: string;
+	mode?: SubscriptionMode;
+	keywords?: string[];
+}
+
+/** `PUT /api/v1/chats/:id/subscription` -- an upsert (find_or_initialize_by
+ *  on salt-api's side), not a partial patch: send the whole desired state,
+ *  not just what changed. */
+export function buildUpdateSubscriptionRequest(params: UpdateSubscriptionParams): SaltRequestSpec {
+	requireNonEmpty(params.chatId, 'chatId');
+	const body: IDataObject = {};
+	if (params.mode) body.mode = params.mode;
+	if (params.keywords) body.keywords = params.keywords;
+	return { method: 'PUT', path: `/api/v1/chats/${params.chatId}/subscription`, body };
+}
+
+/** `DELETE /api/v1/chats/:id/subscription` -- back to the unwritten default
+ *  ("addressed", no keywords), same shape as never having set one at all. */
+export function buildDeleteSubscriptionRequest(chatId: string): SaltRequestSpec {
+	requireNonEmpty(chatId, 'chatId');
+	return { method: 'DELETE', path: `/api/v1/chats/${chatId}/subscription` };
+}
+
 // --- Hand-offs (not exposed as a node operation yet, kept for completeness) ---
 
 export function buildHandOffRequest(params: { chatId: string; toAgentId: string; reason?: string }): SaltRequestSpec {

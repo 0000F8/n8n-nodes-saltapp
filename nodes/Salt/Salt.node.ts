@@ -13,15 +13,20 @@ import type {
 import { NodeConnectionTypes, NodeApiError, NodeOperationError } from 'n8n-workflow';
 
 import { decryptArmoredMessage, derivePublicKeyArmored, encryptForRecipients, looksLikePgpMessage } from '../shared/pgp';
+import { isEncryptedChat, isEncryptedMessage, openRoomText } from '../shared/openRooms';
 import { encodeResumeActionId } from '../shared/resumeToken';
 import {
+	buildDeleteSubscriptionRequest,
 	buildGetChatRequest,
+	buildGetSubscriptionRequest,
 	buildPostCardRequest,
 	buildPostMessageRequest,
 	buildRequestPaymentRequest,
 	buildSendInvoiceRequest,
 	buildUpdateCardRequest,
+	buildUpdateSubscriptionRequest,
 	CardBlock,
+	SubscriptionMode,
 } from '../shared/SaltApiClient';
 
 interface SaltCredentials {
@@ -175,7 +180,27 @@ export class Salt implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				displayOptions: { show: { resource: ['chat'] } },
-				options: [{ name: 'Get', value: 'get', description: 'Get a chat and its members', action: 'Get a chat' }],
+				options: [
+					{ name: 'Get', value: 'get', description: 'Get a chat and its members', action: 'Get a chat' },
+					{
+						name: 'Get Interests',
+						value: 'getInterests',
+						description: "This agent's own follow setting for an open room",
+						action: 'Get room interests',
+					},
+					{
+						name: 'Set Interests',
+						value: 'setInterests',
+						description: 'Set which posts in an open room deliver to this agent',
+						action: 'Set room interests',
+					},
+					{
+						name: 'Clear Interests',
+						value: 'clearInterests',
+						description: "Reset this agent's open-room interests to the default (addressed)",
+						action: 'Clear room interests',
+					},
+				],
 				default: 'get',
 			},
 			// --- Agent ---
@@ -209,6 +234,40 @@ export class Salt implements INodeType {
 					},
 				},
 				description: 'The Salt chat to act in',
+			},
+
+			// --- Chat: Set Interests ---
+			{
+				displayName: 'Mode',
+				name: 'subscriptionMode',
+				type: 'options',
+				options: [
+					{
+						name: 'Addressed to Me',
+						value: 'addressed',
+						description: 'Only on a mention, a reply, or a 1:1 -- the default, same as an encrypted chat always has',
+					},
+					{
+						name: 'Keywords',
+						value: 'keywords',
+						description: 'Addressed to me, plus any post matching one of the given keywords',
+					},
+					{ name: 'Everything', value: 'all', description: 'Every post in this room' },
+				],
+				default: 'addressed',
+				displayOptions: { show: { resource: ['chat'], operation: ['setInterests'] } },
+				description:
+					'Only meaningful for an open (unencrypted) room -- an encrypted chat always delivers on mention/reply/1:1 and refuses this call. See the Salt Trigger\'s "New Message" event.',
+			},
+			{
+				displayName: 'Keywords',
+				name: 'subscriptionKeywords',
+				type: 'string',
+				default: '',
+				placeholder: 'launch,incident,deploy',
+				displayOptions: { show: { resource: ['chat'], operation: ['setInterests'], subscriptionMode: ['keywords'] } },
+				description:
+					'Comma-separated words or @handles -- whole-word, case-insensitive match against each post in the room',
 			},
 
 			// --- Message: Send ---
@@ -496,6 +555,34 @@ async function executeOne(
 		return saltRequest.call(this, spec.method, spec.path, spec.body);
 	}
 
+	if (resource === 'chat' && operation === 'getInterests') {
+		const chatId = this.getNodeParameter('chatId', i) as string;
+		const spec = buildGetSubscriptionRequest(chatId);
+		return saltRequest.call(this, spec.method, spec.path, spec.body);
+	}
+
+	if (resource === 'chat' && operation === 'setInterests') {
+		const chatId = this.getNodeParameter('chatId', i) as string;
+		const mode = this.getNodeParameter('subscriptionMode', i, 'addressed') as SubscriptionMode;
+		const keywordsRaw = this.getNodeParameter('subscriptionKeywords', i, '') as string;
+		// Sent regardless of mode -- this is a full "set", not a partial
+		// patch: switching away from "keywords" also clears any keywords a
+		// previous call left behind, rather than leaving them stranded and
+		// inert until "keywords" mode is picked again.
+		const keywords = keywordsRaw
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const spec = buildUpdateSubscriptionRequest({ chatId, mode, keywords });
+		return saltRequest.call(this, spec.method, spec.path, spec.body);
+	}
+
+	if (resource === 'chat' && operation === 'clearInterests') {
+		const chatId = this.getNodeParameter('chatId', i) as string;
+		const spec = buildDeleteSubscriptionRequest(chatId);
+		return saltRequest.call(this, spec.method, spec.path, spec.body);
+	}
+
 	if (resource === 'message' && operation === 'send') {
 		const chatId = this.getNodeParameter('chatId', i) as string;
 		const text = this.getNodeParameter('text', i) as string;
@@ -506,7 +593,17 @@ async function executeOne(
 			.filter(Boolean);
 
 		const chat = await saltRequest.call(this, 'GET', buildGetChatRequest(chatId).path);
-		const members = ((chat.session as IDataObject)?.users ?? []) as SaltChatMember[];
+		const session = (chat.session as IDataObject) ?? {};
+
+		if (!isEncryptedChat(session)) {
+			// Open room: salt-api stores this chat's messages as plain text
+			// and refuses ciphertext for it (MessagesController#create) -- no
+			// PGP round trip, no member public keys needed.
+			const spec = buildPostMessageRequest({ chatId, message: text, mentions });
+			return saltRequest.call(this, spec.method, spec.path, spec.body);
+		}
+
+		const members = (session.users ?? []) as SaltChatMember[];
 		const recipientKeys = recipientKeysExcludingSelf(members, credentials.agentId);
 		if (recipientKeys.length === 0) {
 			throw new NodeOperationError(this.getNode(), `Chat ${chatId} has no other member with a public key to encrypt for`, {
@@ -532,6 +629,11 @@ async function executeOne(
 		const rawMessages = (chat.messages ?? []) as IDataObject[];
 		const decrypted = await Promise.all(
 			rawMessages.map(async (m) => {
+				if (!isEncryptedMessage(m)) {
+					// Open room: already plain text, never PGP -- never attempt
+					// a decrypt on it (it would just fail looksLikePgpMessage).
+					return { ...m, text: openRoomText(m) };
+				}
 				const ciphertext = m.message;
 				if (!looksLikePgpMessage(ciphertext)) return m;
 				try {
