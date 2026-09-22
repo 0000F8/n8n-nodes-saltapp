@@ -9,6 +9,7 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { decryptArmoredMessage, looksLikePgpMessage } from '../shared/pgp';
+import { deliveredBecause, isEncryptedMessage, openRoomText, OpenRoomMessage } from '../shared/openRooms';
 import { decodeResumeActionId } from '../shared/resumeToken';
 import { buildGetWebhookSecretRequest, buildSetCallbackRequest, buildSetDeliveryModeRequest } from '../shared/SaltApiClient';
 import { verifySignature } from '../shared/signature';
@@ -76,7 +77,8 @@ export class SaltTrigger implements INodeType {
 					{
 						name: 'New Message',
 						value: 'message',
-						description: "A chat message this agent's key can decrypt, already decrypted for you",
+						description:
+							"A chat message, always readable as message.text -- decrypted for you in an encrypted chat, already plain text in an open room (the output's encrypted field says which, delivered_because says why an open room delivered it)",
 					},
 					{
 						name: 'Chat Opened',
@@ -304,8 +306,39 @@ export class SaltTrigger implements INodeType {
 		}
 
 		if (eventName === 'message') {
+			const messageBody = body.message as OpenRoomMessage | undefined;
+			// Open rooms (2026-09-22): `message.encrypted === false` means
+			// `message.message` is already plain text -- salt-api never PGP-
+			// armors it, so there's nothing to decrypt and attempting to would
+			// just fail `looksLikePgpMessage` and drop the event. `encrypted`
+			// and `delivered_because` ("mention"|"reply"|"keyword"|"all", open
+			// rooms only) are surfaced as top-level output fields alongside
+			// their usual place on `message`, so a workflow can branch on
+			// `{{$json.encrypted}}` / `{{$json.delivered_because}}` without
+			// digging into the message object.
+			const encrypted = isEncryptedMessage(messageBody);
+			const because = deliveredBecause(messageBody);
+
+			if (!encrypted) {
+				return {
+					workflowData: [
+						[
+							{
+								json: {
+									event: 'message',
+									chat: body.chat,
+									message: { ...messageBody, text: openRoomText(messageBody) },
+									encrypted: false,
+									delivered_because: because,
+								},
+							},
+						],
+					],
+				};
+			}
+
 			const credentials = (await this.getCredentials('saltAppApi')) as unknown as SaltCredentials;
-			const ciphertext = body.message?.message;
+			const ciphertext = messageBody?.message;
 			if (!looksLikePgpMessage(ciphertext)) {
 				// A system event riding the message webhook (e.g. a status
 				// change) rather than an encrypted chat message -- nothing to
@@ -329,7 +362,9 @@ export class SaltTrigger implements INodeType {
 							json: {
 								event: 'message',
 								chat: body.chat,
-								message: { ...body.message, text: plaintext },
+								message: { ...messageBody, text: plaintext },
+								encrypted: true,
+								delivered_because: because,
 							},
 						},
 					],
