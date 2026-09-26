@@ -25,6 +25,7 @@ import {
 	buildSendInvoiceRequest,
 	buildUpdateCardRequest,
 	buildUpdateSubscriptionRequest,
+	cardIdFromPostCardResponse,
 	CardBlock,
 	SubscriptionMode,
 } from '../shared/SaltApiClient';
@@ -745,7 +746,9 @@ async function executeOne(
 
 		// Only reached if nobody taps a button before the timeout above --
 		// see Salt.node.ts's webhook() for the "someone answered" output.
-		return { event: 'askAndWait', answered: false, timedOut: true, chatId, cardId: card.id, question };
+		// `card.id` doesn't exist on this response -- see
+		// cardIdFromPostCardResponse's doc comment.
+		return { event: 'askAndWait', answered: false, timedOut: true, chatId, cardId: cardIdFromPostCardResponse(card), question };
 	}
 
 	throw new NodeOperationError(this.getNode(), `Unknown resource/operation: ${resource}/${operation}`, { itemIndex: i });

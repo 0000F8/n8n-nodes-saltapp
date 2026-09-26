@@ -192,6 +192,19 @@ callback (see Salt Trigger, above). So this package bridges the two itself:
 Tapped" on, or this never resumes.** See
 [examples/ask-human-and-wait.json](./examples/ask-human-and-wait.json).
 
+**Concurrency**: each ask's resume token is entirely self-contained -- the
+`{resumeUrl, option}` pair is encoded fresh into that ask's own card buttons
+(`nodes/shared/resumeToken.ts`), and the trigger only ever decodes whichever
+token the tapped button carries and posts to it. There is no shared cursor,
+counter or poll loop anywhere in this bridge, so any number of "Ask a Human
+and Wait" nodes can be paused on the same agent at once -- across the same
+chat or different ones -- with no risk of one answer resolving the wrong
+execution. (This package doesn't read Salt's socket-mode outbox,
+`GET /api/v1/agent/updates`, at all -- see
+[HANDOFF.md](./HANDOFF.md)'s 2026-09-26 entry for why that mechanism, and
+the polling race some other Salt integrations had to fix in it, doesn't
+apply to this design.)
+
 This bridge has been verified with unit tests of its pure encode/decode
 logic (`test/resumeToken.test.ts`) but **not** end-to-end against a running
 n8n + Salt pair -- see [HANDOFF.md](./HANDOFF.md)'s UAT steps before relying

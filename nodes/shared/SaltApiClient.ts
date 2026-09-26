@@ -128,6 +128,22 @@ export function buildUpdateCardRequest(params: { cardId: string; blocks: CardBlo
 	return { method: 'PATCH', path: `/api/v1/cards/${params.cardId}`, body: { blocks: params.blocks } };
 }
 
+/** `POST /api/v1/cards`'s response is the card's chat BUBBLE (a formatted
+ *  Message, see salt-api's `Message#formatted_message` / `CardsController#create`)
+ *  -- `message_id` (the bubble message's own id) and `resource_id` (the
+ *  CARD's own id, == `resource.id`). There is deliberately no top-level
+ *  `id`: reading `response.id` for "the card id" silently resolves to
+ *  `undefined` (this was AgentKit's day-one bug, hidden by a mock that
+ *  modeled a shape salt-api doesn't actually return -- see HANDOFF.md's
+ *  2026-09-26 entry). Falls back to `resource.id` for resilience, since the
+ *  two are defined to be equal. */
+export function cardIdFromPostCardResponse(response: IDataObject): string | undefined {
+	if (typeof response.resource_id === 'string') return response.resource_id;
+	const resource = response.resource as IDataObject | undefined;
+	if (resource && typeof resource.id === 'string') return resource.id;
+	return undefined;
+}
+
 // --- Payments (transfer_requests rail) ---
 
 export interface RequestPaymentParams {

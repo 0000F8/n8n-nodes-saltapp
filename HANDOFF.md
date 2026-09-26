@@ -1,5 +1,65 @@
 # HANDOFF -- n8n-nodes-saltapp
 
+## 2026-09-26 outbox-race audit (no outbox here; a real card-id bug found and fixed instead)
+
+Requested: audit and fix the "shared socket-mode outbox" bug class already
+fixed in `salt-mcp` 0.2.1 and `saltapp-agentkit` -- `GET /api/v1/agent/updates`
+keeps exactly ONE forward-only cursor per agent server-side (`after=0` ≡
+omit; a lower `after` is silently ignored), so a stateless poller of it races
+every other poller on the same agent and can strand or drop deliveries.
+
+**Finding: this package never reads that endpoint, in the ask/answer path or
+anywhere else.** `grep -rn "agent/updates" nodes/` turns up exactly one hit
+(`nodes/shared/SaltApiClient.ts`'s doc comment on `buildSetDeliveryModeRequest`,
+explaining what happens to an agent's undelivered updates if it's switched to
+socket mode with nobody consuming them -- not a call site). "Ask a Human and
+Wait" was built webhook-first from 0.1.0: it posts a card whose buttons each
+carry a **self-contained** resume token (`{resumeUrl, option}`, base64url-JSON,
+`nodes/shared/resumeToken.ts`), pauses the execution with n8n's own
+`putExecutionToWait` (not a manual sleep/poll loop), and resumes when Salt's
+webhook delivers the tapped button's `card_interaction` to the Salt Trigger,
+which decodes the token and POSTs straight to that execution's `resumeUrl`.
+There is no shared cursor anywhere in this design -- each ask carries its own
+destination -- so the concurrency property the other repos had to *build*
+(unlimited concurrent asks per agent, no poller racing another) was already
+true here for a structural reason (no polling, no shared state) rather than
+needing a fix. Nothing was removed or gated, because there was no trigger or
+"read updates" operation reading the outbox to begin with, and no timer loop
+inside `execute()` to replace with a bounded `Wait` node -- `putExecutionToWait`
+already *is* n8n's own equivalent of that. See README.md's new "Concurrency"
+note under "Ask a Human and Wait" for the user-facing version of this.
+
+**What the audit DID find and fix**: `Salt.node.ts`'s `askAndWait` timeout
+branch read `card.id` off `POST /api/v1/cards`'s response for its diagnostic
+`cardId` output field. That response has no top-level `id` -- verified
+directly against salt-api's source (`app/controllers/api/v1/cards_controller.rb`'s
+`create` action renders `message.formatted_message(Card.to_s, ...)`, and
+`Message#formatted_message` in `app/models/message.rb:113-181` only ever sets
+`message_id` (the bubble message's own id) and, when a resource is attached,
+`resource_id`/`resource` (the card's own id, `resource_id == resource.id`) --
+never a bare `id` key). `card.id` therefore always resolved to `undefined` on
+this path. This is the same bug class the coordinator flagged in AgentKit's
+history ("card.id ... its mocks hid it") -- and it was likewise untested here:
+no test in this repo exercises `Salt.node.ts`'s `execute()`/`executeOne` at
+all (the whole testing strategy here is pulling logic into pure
+`nodes/shared/` functions specifically so it's unit-testable without a full
+n8n execution context -- see AGENTS.md -- and this one small mapping had never
+been pulled out). Fixed by extracting `cardIdFromPostCardResponse()` into
+`SaltApiClient.ts` (reads `resource_id`, falls back to `resource.id`, returns
+`undefined` rather than throwing on neither) and calling it from the timeout
+branch instead of `card.id`; three new tests in `test/requestShaping.test.ts`
+model the real response shape (including a case with a *decoy* top-level `id`
+key, to prove the fix doesn't regress back to reading it).
+
+Only `nodes/shared/SaltApiClient.ts`, `nodes/Salt/Salt.node.ts`,
+`test/requestShaping.test.ts`, README.md and this file changed. 59 -> 62
+tests passing (still 5 files -- no test file added or removed, only cases);
+`npx tsc --noEmit`, `npm run lint` (`n8n-node lint`), and `npm run build`
+(including the `bundle-pgp` step -- `grep -c 'require("openpgp")'
+dist/nodes/shared/pgp.js` is still `0`) are all clean. Committed to a new
+branch, `lane/card-poll`, off `main`; not pushed, per the standing "the
+coordinator's call" note below.
+
 ## 2026-09-22 alignment pass (round-4 socket contract, real brand icons)
 
 - **Trigger deactivation now silences Salt's retries.** `delete()` PATCHes

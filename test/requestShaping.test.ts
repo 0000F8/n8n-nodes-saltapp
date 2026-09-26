@@ -12,6 +12,7 @@ import {
 	buildSetDeliveryModeRequest,
 	buildUpdateCardRequest,
 	buildUpdateSubscriptionRequest,
+	cardIdFromPostCardResponse,
 	validateLineItems,
 } from '../nodes/shared/SaltApiClient';
 
@@ -121,6 +122,34 @@ describe('buildPostCardRequest / buildUpdateCardRequest', () => {
 	it('shapes an update as a PATCH to the card id', () => {
 		const spec = buildUpdateCardRequest({ cardId: 'card1', blocks: [{ type: 'divider' }] });
 		expect(spec).toEqual({ method: 'PATCH', path: '/api/v1/cards/card1', body: { blocks: [{ type: 'divider' }] } });
+	});
+});
+
+describe('cardIdFromPostCardResponse', () => {
+	// The real shape POST /api/v1/cards returns (salt-api's
+	// Message#formatted_message / CardsController#create): the card's chat
+	// bubble, keyed by message_id, with resource_id/resource naming the
+	// card itself. No top-level `id` -- reading `response.id` (as this
+	// package used to, and as AgentKit did independently) always resolves
+	// to undefined.
+	it('reads resource_id -- the field the real response actually carries', () => {
+		const response = {
+			message_id: 'msg1',
+			resource_type: 'Card',
+			resource_id: 'card1',
+			resource: { id: 'card1', state: {} },
+		};
+		expect(cardIdFromPostCardResponse(response)).toBe('card1');
+	});
+
+	it('falls back to resource.id when resource_id is absent', () => {
+		const response = { message_id: 'msg1', resource: { id: 'card1' } };
+		expect(cardIdFromPostCardResponse(response)).toBe('card1');
+	});
+
+	it('returns undefined rather than throwing when neither field is present (e.g. a top-level id, which does not exist on this response)', () => {
+		expect(cardIdFromPostCardResponse({ id: 'not-the-card-id', message_id: 'msg1' })).toBeUndefined();
+		expect(cardIdFromPostCardResponse({})).toBeUndefined();
 	});
 });
 
