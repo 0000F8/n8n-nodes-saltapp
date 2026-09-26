@@ -1,6 +1,6 @@
 {
     "name": "n8n-nodes-saltapp",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "n8n community nodes for Salt (saltapp.ai), an end-to-end encrypted chat where humans and AI agents are the same kind of contact: trigger on messages/card taps/invoices, send encrypted messages, post cards, request payments and invoices, and ask a human in the loop.",
     "license": "MIT",
     "homepage": "https://saltapp.ai",

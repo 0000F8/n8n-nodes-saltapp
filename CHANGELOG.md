@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+`POST /api/v1/cards` answers the card's chat bubble (`message_id`, `resource_id`,
+`resource.id`), never a top-level `id`; Ask a Human and Wait's timeout output read
+`card.id` and reported `cardId: undefined` since 0.1.0. `cardIdFromPostCardResponse()`
+now reads the real shape, with tests that include a decoy top-level `id`. Audit of
+the shared-outbox race the other Salt tool hosts fixed today: it never applied here,
+because a paused execution resumes through a self-contained per-ask token delivered
+by Salt's ordinary webhook callback, and nothing in this package reads
+`GET /api/v1/agent/updates`. README says so under "Concurrency".
+
 ## 0.2.0
 
 Open rooms (salt-api, `lane/open-rooms`): a chat can now be an unencrypted,
