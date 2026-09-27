@@ -20,7 +20,7 @@
     },
     "scripts": {
         "build": "n8n-node build && node scripts/bundle-pgp.mjs",
-        "build:watch": "tsc --watch",
+        "build:watch": "tsc --watch --incremental --tsBuildInfoFile ./node_modules/.cache/tsbuildinfo",
         "dev": "n8n-node dev",
         "lint": "n8n-node lint",
         "lint:fix": "n8n-node lint --fix",
