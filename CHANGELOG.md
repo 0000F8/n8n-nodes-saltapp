@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3
+
+**A rejected webhook signature no longer costs an API call.** `SaltTrigger`'s `webhook()` refetched
+the agent's webhook secret on *any* verification failure — a missing header, a malformed one, a stale
+timestamp, a wrong digest — so every garbage POST to an activated trigger's public URL turned into one
+real, authenticated `GET /api/v1/agents/webhook_secret` against Salt. A cheap flood became an
+amplified one. The refetch is now gated behind `signatureShapeIsPlausible()` (no secret, no network)
+and a 60-second cooldown keyed on the *attempt*, not on success: a forged-but-well-formed signature
+can make the fetch succeed without validating anything, so success-gating would have been a no-op
+against exactly that case. `test/SaltTrigger.webhook.test.ts` covers it (62 → 69 tests).
+
 ## 0.2.2
 
 Publish-ready packaging: an explicit `files` allowlist so the tarball carries only what runs,
