@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2
+
+Publish-ready packaging: an explicit `files` allowlist so the tarball carries only what runs,
+and TypeScript's incremental build cache is out of it. That relocation introduced a real
+regression first — the cache survived `n8n-node build`'s `dist/` wipe, so a *second* consecutive
+build silently skipped re-emitting and shipped an unbundled PGP module — so incremental mode is
+gone from the main tsconfig (only `build:watch` keeps it, with its own cache flags). Verified by
+building twice in a row. `salt-agent-sdk` is now required at `^0.12.2`; the old `^0.10.0` range
+could not resolve the SDK version this node is built against. `AGENTS.md` leads with the
+Salt-specific orientation (commands, layout, the response-shape rules that bite) and keeps the
+generic n8n scaffold reference below it.
+
 ## 0.2.1
 
 `POST /api/v1/cards` answers the card's chat bubble (`message_id`, `resource_id`,
