@@ -12,7 +12,16 @@ import { decryptArmoredMessage, looksLikePgpMessage } from '../shared/pgp';
 import { deliveredBecause, isEncryptedMessage, openRoomText, OpenRoomMessage } from '../shared/openRooms';
 import { decodeResumeActionId } from '../shared/resumeToken';
 import { buildGetWebhookSecretRequest, buildSetCallbackRequest, buildSetDeliveryModeRequest } from '../shared/SaltApiClient';
-import { verifySignature } from '../shared/signature';
+import { signatureShapeIsPlausible, verifySignature } from '../shared/signature';
+
+// Bounds how often an uncached secret fetch can be attempted, whatever the
+// outcome of the last one was. Without this, EITHER a fetch that keeps
+// coming back empty (a network blip, or Salt genuinely not having minted
+// a secret yet) OR a flood of well-formed-but-forged signatures (Salt
+// happily returns a real secret each time -- it just never validates a
+// forgery) would refetch on every single webhook POST. See the comment
+// on `fetchSecret` below and HANDOFF.md's webhook-hardening entry.
+const SECRET_FETCH_COOLDOWN_MS = 60_000;
 
 /** What this trigger keeps in the workflow's own persisted static data
  *  (`getWorkflowStaticData('node')`) between activate/deactivate/webhook
@@ -22,6 +31,14 @@ import { verifySignature } from '../shared/signature';
 interface SaltTriggerStaticData {
 	registeredUrl?: string;
 	webhookSecret?: string;
+	/** Timestamp (`Date.now()`) of the last time `fetchSecret()` actually
+	 *  made a `GET /api/v1/agents/webhook_secret` call, win or lose -- see
+	 *  `SECRET_FETCH_COOLDOWN_MS`. Keyed on the ATTEMPT, not on whether it
+	 *  came back with a usable secret: a forged signature can make the
+	 *  fetch "succeed" (it returns SOME secret) while still leaving the
+	 *  signature unverifiable, and that must cool down just as much as a
+	 *  fetch that came back empty or threw. */
+	lastSecretFetchAttemptedAt?: number;
 }
 
 interface SaltCredentials {
@@ -219,6 +236,7 @@ export class SaltTrigger implements INodeType {
 				const staticData = this.getWorkflowStaticData('node') as SaltTriggerStaticData;
 				delete staticData.registeredUrl;
 				delete staticData.webhookSecret;
+				delete staticData.lastSecretFetchAttemptedAt;
 				return true;
 			},
 		},
@@ -236,15 +254,50 @@ export class SaltTrigger implements INodeType {
 		const headers = this.getHeaderData() as Record<string, string | string[] | undefined>;
 		const signatureHeader = headerValue(headers, 'x-salt-signature');
 
+		// Shape-and-freshness check FIRST, before anything that touches the
+		// network: a missing header, a malformed one, or a wildly stale
+		// timestamp is rejected here for free. This is what stops a flood of
+		// unauthenticated garbage POSTs from costing this node's Salt
+		// credential a single API call -- previously `fetchSecret` below ran
+		// unconditionally on ANY verification failure, including one with no
+		// signature at all, so every garbage POST was one real
+		// `GET /api/v1/agents/webhook_secret` call. See HANDOFF.md's
+		// webhook-hardening entry.
+		const shape = signatureShapeIsPlausible({ signatureHeader });
+		if (!shape.valid) {
+			throw new NodeOperationError(this.getNode(), `Rejected an unverifiable Salt webhook: ${shape.reason}`);
+		}
+
 		const fetchSecret = async (): Promise<string | undefined> => {
+			// Bounded: an uncached fetch is ATTEMPTED at most once per
+			// SECRET_FETCH_COOLDOWN_MS, never once per request -- gated on
+			// the attempt, not on whether it came back with a secret that
+			// happens to validate THIS signature. A forged signature can
+			// make the fetch "succeed" (Salt genuinely has a secret, it
+			// just isn't the one that produced this header) -- if the
+			// cooldown only re-armed on failure, that case would refetch on
+			// every single forged request forever, which is exactly the
+			// amplification this fix exists to close.
+			if (
+				staticData.lastSecretFetchAttemptedAt !== undefined &&
+				Date.now() - staticData.lastSecretFetchAttemptedAt < SECRET_FETCH_COOLDOWN_MS
+			) {
+				return staticData.webhookSecret;
+			}
+			staticData.lastSecretFetchAttemptedAt = Date.now();
 			const spec = buildGetWebhookSecretRequest();
-			const response = (await this.helpers.httpRequestWithAuthentication.call(this, 'saltAppApi', {
-				method: spec.method,
-				url: spec.path,
-				json: true,
-			})) as { webhook_secret?: string };
-			staticData.webhookSecret = response.webhook_secret;
-			return response.webhook_secret;
+			try {
+				const response = (await this.helpers.httpRequestWithAuthentication.call(this, 'saltAppApi', {
+					method: spec.method,
+					url: spec.path,
+					json: true,
+				})) as { webhook_secret?: string };
+				staticData.webhookSecret = response.webhook_secret;
+				return response.webhook_secret;
+			} catch (error) {
+				this.logger.warn(`Salt Trigger: could not fetch webhook signing secret: ${(error as Error).message}`);
+				return staticData.webhookSecret;
+			}
 		};
 
 		let secret = staticData.webhookSecret;
@@ -254,7 +307,9 @@ export class SaltTrigger implements INodeType {
 		if (!verification.valid) {
 			// Could be a rotated secret (POST /api/v1/agents/:id/rotate_webhook_secret)
 			// this cached copy hasn't caught up with yet -- refetch once before
-			// rejecting outright.
+			// rejecting outright. Bounded by fetchSecret's own cooldown above, so
+			// a sustained flood of well-formed-but-wrong signatures costs at most
+			// one real Salt API call per cooldown window, never one per request.
 			secret = await fetchSecret();
 			verification = verifySignature({ rawBody, signatureHeader, secret: secret ?? '' });
 		}

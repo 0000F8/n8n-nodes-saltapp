@@ -40,23 +40,57 @@ export type SignatureVerificationResult =
 	| { valid: false; reason: string };
 
 /**
+ * Cheap, no-network check of an `X-Salt-Signature` header's SHAPE and
+ * freshness -- whether it's even worth spending a webhook-secret lookup
+ * on. Never touches `secret`, so a caller can (and must) run this BEFORE
+ * fetching or refreshing the signing secret: a header that's missing,
+ * malformed, or wildly stale is rejected here for free. This is what
+ * keeps a flood of unauthenticated garbage POSTs from costing this
+ * node's Salt credential a single API call -- see SaltTrigger.node.ts's
+ * `webhook()` for the caller and HANDOFF.md's webhook-hardening entry
+ * for the incident this closes (a sibling adapter turned every garbage
+ * POST into a real `GET /api/v1/agents/webhook_secret` call).
+ */
+export function signatureShapeIsPlausible(input: {
+	signatureHeader: string | undefined;
+	toleranceSeconds?: number;
+	now?: () => number;
+}): SignatureVerificationResult {
+	const { signatureHeader, toleranceSeconds = 300, now = Date.now } = input;
+
+	if (!signatureHeader) return { valid: false, reason: 'missing X-Salt-Signature header' };
+
+	const match = SIGNATURE_RE.exec(signatureHeader.trim());
+	if (!match) return { valid: false, reason: 'malformed X-Salt-Signature header' };
+	const [, timestampStr] = match;
+
+	const age = Math.abs(Math.floor(now() / 1000) - Number(timestampStr));
+	if (age > toleranceSeconds) return { valid: false, reason: `stale signature (${age}s old)` };
+
+	return { valid: true };
+}
+
+/**
  * Returns `{valid: true}` when `rawBody` really was signed by `secret`
  * within the allowed clock tolerance, or `{valid: false, reason}` naming
  * exactly why not (missing header, malformed header, stale, or a bad
  * digest) -- never throws.
+ *
+ * This still re-checks shape/freshness itself (so it's safe to call on
+ * its own, e.g. from tests), but a caller sitting in front of a real
+ * network fetch for `secret` should call `signatureShapeIsPlausible`
+ * FIRST and only fetch a secret worth checking against once that passes
+ * -- see SaltTrigger.node.ts's `webhook()`.
  */
 export function verifySignature(input: SignatureVerificationInput): SignatureVerificationResult {
 	const { rawBody, signatureHeader, secret, toleranceSeconds = 300, now = Date.now } = input;
 
-	if (!signatureHeader) return { valid: false, reason: 'missing X-Salt-Signature header' };
+	const shape = signatureShapeIsPlausible({ signatureHeader, toleranceSeconds, now });
+	if (!shape.valid) return shape;
 	if (!secret) return { valid: false, reason: 'no webhook signing secret configured' };
 
-	const match = SIGNATURE_RE.exec(signatureHeader.trim());
-	if (!match) return { valid: false, reason: 'malformed X-Salt-Signature header' };
-	const [, timestampStr, digestHex] = match;
-
-	const age = Math.abs(Math.floor(now() / 1000) - Number(timestampStr));
-	if (age > toleranceSeconds) return { valid: false, reason: `stale signature (${age}s old)` };
+	const match = SIGNATURE_RE.exec((signatureHeader as string).trim());
+	const [, timestampStr, digestHex] = match as RegExpExecArray;
 
 	const expected = createHmac('sha256', secret).update(`${timestampStr}.${rawBody}`).digest('hex');
 
