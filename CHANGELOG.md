@@ -2,6 +2,12 @@
 
 ## 0.2.3
 
+**First registry release.** This package has no `salt-agent-sdk` dependency (PGP is bundled from
+`openpgp` into `dist/nodes/shared/pgp.js`, and the tarball has no runtime dependencies), so the
+`salt-agent-sdk` 0.18.0 release changes nothing here; lint, build and all 69 tests pass against a
+clean `npm ci`. Publish through `publish.yml` (npm provenance); `prepublishOnly` blocks a bare
+local `npm publish`.
+
 **A rejected webhook signature no longer costs an API call.** `SaltTrigger`'s `webhook()` refetched
 the agent's webhook secret on *any* verification failure — a missing header, a malformed one, a stale
 timestamp, a wrong digest — so every garbage POST to an activated trigger's public URL turned into one
