@@ -86,6 +86,10 @@ export interface PostMessageParams {
 	senderMessage?: string;
 	mentions?: string[];
 	quiet?: boolean;
+	/** Send guard: member user id -> the public fingerprint of the key `message` was encrypted to. */
+	recipientFingerprints?: Record<string, string>;
+	/** Send guard: the fingerprint of the sender's own key used for `senderMessage`. */
+	senderFingerprint?: string;
 }
 
 /** `POST /api/v1/messages`. */
@@ -96,6 +100,8 @@ export function buildPostMessageRequest(params: PostMessageParams): SaltRequestS
 	if (params.senderMessage) body.sender_message = params.senderMessage;
 	if (params.mentions?.length) body.mentions = params.mentions;
 	if (params.quiet) body.quiet = true;
+	if (params.recipientFingerprints && Object.keys(params.recipientFingerprints).length > 0) body.recipient_fingerprints = params.recipientFingerprints;
+	if (params.senderFingerprint) body.sender_fingerprint = params.senderFingerprint;
 	return { method: 'POST', path: '/api/v1/messages', body };
 }
 

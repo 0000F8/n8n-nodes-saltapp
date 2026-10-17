@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+**Send guard.** "Message > Send" in an encrypted chat now sends `recipient_fingerprints` and `sender_fingerprint` (members read at send time). On a 409 `stale_recipient_keys` it re-encrypts once to the keys Salt returns and resends; a second refusal fails the item. Skipped (guard left off) when this agent cannot be told apart from the other members or a member has no fingerprint.
+
 ## 0.2.3
 
 **A rejected webhook signature no longer costs an API call.** `SaltTrigger`'s `webhook()` refetched

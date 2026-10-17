@@ -12,6 +12,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeApiError, NodeOperationError } from 'n8n-workflow';
 
+import { sendEncryptedWithGuard } from '../shared/sendGuard';
 import { decryptArmoredMessage, derivePublicKeyArmored, encryptForRecipients, looksLikePgpMessage } from '../shared/pgp';
 import { isEncryptedChat, isEncryptedMessage, openRoomText } from '../shared/openRooms';
 import { encodeResumeActionId } from '../shared/resumeToken';
@@ -605,20 +606,28 @@ async function executeOne(
 		}
 
 		const members = (session.users ?? []) as SaltChatMember[];
-		const recipientKeys = recipientKeysExcludingSelf(members, credentials.agentId);
-		if (recipientKeys.length === 0) {
+		if (recipientKeysExcludingSelf(members, credentials.agentId).length === 0) {
 			throw new NodeOperationError(this.getNode(), `Chat ${chatId} has no other member with a public key to encrypt for`, {
 				itemIndex: i,
 			});
 		}
 		const ownPublicKey = await derivePublicKeyArmored(credentials.pgpPrivateKey);
-		const [message, senderMessage] = await Promise.all([
-			encryptForRecipients(text, recipientKeys),
-			encryptForRecipients(text, [ownPublicKey]),
-		]);
-
-		const spec = buildPostMessageRequest({ chatId, message, senderMessage, mentions });
-		return saltRequest.call(this, spec.method, spec.path, spec.body);
+		// Members were read just above, at send time. On a stale_recipient_keys refusal the keys
+		// Salt returns are used for one re-encrypt (sendGuard.ts).
+		return (await sendEncryptedWithGuard(
+			{
+				encrypt: encryptForRecipients,
+				post: (message, senderMessage, guard) => {
+					const spec = buildPostMessageRequest({ chatId, message, senderMessage, mentions, ...guard });
+					return saltRequest.call(this, spec.method, spec.path, spec.body);
+				},
+			},
+			text,
+			members,
+			credentials.agentId,
+			ownPublicKey,
+			(m) => recipientKeysExcludingSelf(m, credentials.agentId),
+		)) as IDataObject;
 	}
 
 	if (resource === 'message' && operation === 'list') {
